@@ -1,0 +1,30 @@
+plugins {
+  id 'java-library'
+  id 'com.github.johnrengelman.shadow' version '7.0.0'
+}
+
+version = '1.18.1'
+group = 'com.github.neapovil.elevators'
+compileJava.options.encoding = 'UTF-8'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+repositories {
+  maven { url 'https://papermc.io/repo/repository/maven-public/' }
+  maven { url 'https://jitpack.io' }
+  mavenCentral()
+}
+
+dependencies {
+  compileOnly group: 'io.papermc.paper', name: 'paper-api', version: '1.18.1-R0.1-SNAPSHOT'
+  compileOnly group: 'org.inventivetalent.packetlistenerapi', name: 'api', version: '3.9.10-SNAPSHOT'
+  
+  implementation group: 'com.electronwill.night-config', name:'json', version: '3.6.0'
+}
+
+shadowJar {
+  classifier ''
+  relocate 'com.electronwill.nightconfig', 'com.github.neapovil.elevators.nightconfig'
+}
+
+build.dependsOn shadowJar
