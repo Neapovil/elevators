@@ -223,9 +223,8 @@ public final class Elevators extends JavaPlugin implements Listener
         final int y = event.getBlock().getLocation().getBlockY();
         final int z = event.getBlock().getLocation().getBlockZ();
 
-        if (this.config.get("elevators." + (x + y + z)) != null)
+        if (this.config.remove("elevators." + (x + y + z)) != null)
         {
-            this.config.remove("elevators." + (x + y + z));
             event.getBlock().getWorld().dropItem(event.getBlock().getLocation(), new ItemStack(Material.ENDER_PEARL));
             event.getPlayer().sendMessage("Elevator destroyed");
         }
