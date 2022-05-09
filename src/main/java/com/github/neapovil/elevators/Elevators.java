@@ -24,7 +24,8 @@ import com.github.neapovil.elevators.event.PlayerSneakEvent;
 
 import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.sound.Sound.Source;
-import net.md_5.bungee.api.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 
 public final class Elevators extends JavaPlugin implements Listener
 {
@@ -32,19 +33,16 @@ public final class Elevators extends JavaPlugin implements Listener
     private final Sound sound = Sound.sound(org.bukkit.Sound.ENTITY_ENDERMAN_TELEPORT.key(), Source.PLAYER, 1, 1);
     private final List<Material> elevators = Stream.of(Material.values()).filter(i -> i.toString().toLowerCase().endsWith("wool")).toList();
     private FileConfig config;
+    private FileConfig messages;
+    private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
     @Override
     public void onEnable()
     {
         instance = this;
 
-        this.saveResource("elevators.json", false);
-
-        this.config = FileConfig.builder(new File(this.getDataFolder(), "elevators.json"))
-                .autoreload()
-                .autosave()
-                .build();
-        this.config.load();
+        this.config = this.initConfig("elevators.json");
+        this.messages = this.initConfig("messages.json");
 
         this.getServer().getPluginManager().registerEvents(this, this);
 
@@ -197,7 +195,7 @@ public final class Elevators extends JavaPlugin implements Listener
 
         if (this.config.get("elevators." + (x + y + z)) != null)
         {
-            event.getPlayer().sendMessage(ChatColor.RED + "This block is already an elevator");
+            event.getPlayer().sendMessage(this.deserializeMessage("elevator_exists"));
             return;
         }
 
@@ -214,7 +212,7 @@ public final class Elevators extends JavaPlugin implements Listener
             event.getItem().setAmount(newamount);
         }
 
-        event.getPlayer().sendMessage("Elevator created");
+        event.getPlayer().sendMessage(this.deserializeMessage("elevator_created"));
     }
 
     @EventHandler
@@ -227,7 +225,27 @@ public final class Elevators extends JavaPlugin implements Listener
         if (this.config.remove("elevators." + (x + y + z)) != null)
         {
             event.getBlock().getWorld().dropItem(event.getBlock().getLocation(), new ItemStack(Material.ENDER_PEARL));
-            event.getPlayer().sendMessage("Elevator destroyed");
+            event.getPlayer().sendMessage(this.deserializeMessage("elevator_destroyed"));
         }
+    }
+    
+    private final FileConfig initConfig(String fileName)
+    {
+        this.saveResource(fileName, false);
+
+        final FileConfig config = FileConfig.builder(new File(this.getDataFolder(), fileName))
+                .autoreload()
+                .autosave()
+                .build();
+
+        config.load();
+        
+        return config;
+    }
+    
+    private final Component deserializeMessage(String path)
+    {
+        final String message = this.messages.get("messages." + path);
+        return this.miniMessage.deserialize(message);
     }
 }
