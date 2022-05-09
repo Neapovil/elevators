@@ -19,7 +19,7 @@ dependencies {
   compileOnly group: 'io.papermc.paper', name: 'paper-api', version: '1.18.1-R0.1-SNAPSHOT'
   compileOnly group: 'org.inventivetalent.packetlistenerapi', name: 'api', version: '3.9.10-SNAPSHOT'
   
-  implementation group: 'com.electronwill.night-config', name:'json', version: '3.6.0'
+  implementation group: 'com.electronwill.night-config', name:'json', version: '3.6.5'
 }
 
 shadowJar {

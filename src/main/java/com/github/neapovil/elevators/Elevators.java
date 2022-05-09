@@ -24,6 +24,7 @@ import com.github.neapovil.elevators.event.PlayerSneakEvent;
 
 import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.sound.Sound.Source;
+import net.md_5.bungee.api.ChatColor;
 
 public final class Elevators extends JavaPlugin implements Listener
 {
@@ -36,6 +37,14 @@ public final class Elevators extends JavaPlugin implements Listener
     public void onEnable()
     {
         instance = this;
+
+        this.saveResource("elevators.json", false);
+
+        this.config = FileConfig.builder(new File(this.getDataFolder(), "elevators.json"))
+                .autoreload()
+                .autosave()
+                .build();
+        this.config.load();
 
         this.getServer().getPluginManager().registerEvents(this, this);
 
@@ -66,14 +75,6 @@ public final class Elevators extends JavaPlugin implements Listener
                 }
             }
         });
-
-        this.saveResource("elevators.json", false);
-
-        this.config = FileConfig.builder(new File(this.getDataFolder(), "elevators.json"))
-                .autoreload()
-                .autosave()
-                .build();
-        this.config.load();
     }
 
     @Override
@@ -94,9 +95,8 @@ public final class Elevators extends JavaPlugin implements Listener
         final int z = event.getPlayer().getLocation().getBlockZ();
 
         final Location location = new Location(event.getPlayer().getWorld(), x, y - 1, z);
-        final Material material = location.getBlock().getType();
 
-        if (!this.elevators.contains(material))
+        if (!this.elevators.contains(location.getBlock().getType()))
         {
             return;
         }
@@ -169,12 +169,12 @@ public final class Elevators extends JavaPlugin implements Listener
             return;
         }
 
-        if (!this.elevators.contains(event.getClickedBlock().getType()))
+        if (!event.getAction().equals(Action.RIGHT_CLICK_BLOCK))
         {
             return;
         }
 
-        if (!event.getAction().equals(Action.RIGHT_CLICK_BLOCK))
+        if (!this.elevators.contains(event.getClickedBlock().getType()))
         {
             return;
         }
@@ -188,6 +188,8 @@ public final class Elevators extends JavaPlugin implements Listener
         {
             return;
         }
+        
+        event.setCancelled(true);
 
         final int x = event.getClickedBlock().getLocation().getBlockX();
         final int y = event.getClickedBlock().getLocation().getBlockY();
@@ -195,10 +197,9 @@ public final class Elevators extends JavaPlugin implements Listener
 
         if (this.config.get("elevators." + (x + y + z)) != null)
         {
+            event.getPlayer().sendMessage(ChatColor.RED + "This block is already an elevator");
             return;
         }
-
-        event.setCancelled(true);
 
         this.config.set("elevators." + (x + y + z), 0);
 
