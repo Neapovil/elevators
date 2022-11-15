@@ -203,7 +203,7 @@ public final class Elevators extends JavaPlugin implements Listener
     private void playerJoin(PlayerJoinEvent event)
     {
         ((CraftPlayer) event.getPlayer()).getHandle().networkManager.channel.pipeline()
-                .addBefore("packet_handler", event.getPlayer().getName(), new CustomHandler(event.getPlayer()));
+                .addBefore("packet_handler", "elevators-plugin", new CustomHandler(event.getPlayer()));
     }
 
     private NamespacedKey elevatorKey(Location location)
