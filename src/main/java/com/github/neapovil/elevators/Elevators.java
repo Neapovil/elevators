@@ -1,38 +1,41 @@
 package com.github.neapovil.elevators;
 
-import java.io.File;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Stream;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.World;
+import org.bukkit.craftbukkit.v1_18_R2.entity.CraftPlayer;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.inventivetalent.packetlistener.PacketListenerAPI;
-import org.inventivetalent.packetlistener.handler.PacketHandler;
-import org.inventivetalent.packetlistener.handler.ReceivedPacket;
-import org.inventivetalent.packetlistener.handler.SentPacket;
+import org.jetbrains.annotations.Nullable;
 
 import com.destroystokyo.paper.event.player.PlayerJumpEvent;
 import com.electronwill.nightconfig.core.file.FileConfig;
 import com.github.neapovil.elevators.event.PlayerSneakEvent;
 
+import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelHandlerContext;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.sound.Sound;
-import net.kyori.adventure.sound.Sound.Source;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 
 public final class Elevators extends JavaPlugin implements Listener
 {
     private static Elevators instance;
-    private final Sound sound = Sound.sound(org.bukkit.Sound.ENTITY_ENDERMAN_TELEPORT.key(), Source.PLAYER, 1, 1);
+    private final Sound sound = Sound.sound(Key.key("minecraft", "entity.enderman.teleport"), Sound.Source.PLAYER, 1, 1);
     private final List<Material> elevators = Stream.of(Material.values()).filter(i -> i.toString().toLowerCase().endsWith("wool")).toList();
-    private FileConfig config;
     private FileConfig messages;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
@@ -41,38 +44,16 @@ public final class Elevators extends JavaPlugin implements Listener
     {
         instance = this;
 
-        this.config = this.initConfig("elevators.json");
-        this.messages = this.initConfig("messages.json");
+        this.saveResource("messages.json", false);
+
+        this.messages = FileConfig.builder(this.getDataFolder().toPath().resolve("messages.json"))
+                .autoreload()
+                .autosave()
+                .build();
+
+        this.messages.load();
 
         this.getServer().getPluginManager().registerEvents(this, this);
-
-        PacketListenerAPI.addPacketHandler(new PacketHandler(this) {
-            @Override
-            public void onSend(SentPacket packet)
-            {
-            }
-
-            @Override
-            public void onReceive(ReceivedPacket packet)
-            {
-                if (!packet.getPacketName().equals("PacketPlayInEntityAction"))
-                {
-                    return;
-                }
-
-                if (!packet.hasPlayer())
-                {
-                    return;
-                }
-
-                if (packet.getPacketValue(1).toString().equals("PRESS_SHIFT_KEY"))
-                {
-                    this.getPlugin().getServer().getScheduler().runTask(this.getPlugin(), () -> {
-                        this.getPlugin().getServer().getPluginManager().callEvent(new PlayerSneakEvent(packet.getPlayer()));
-                    });
-                }
-            }
-        });
     }
 
     @Override
@@ -88,75 +69,64 @@ public final class Elevators extends JavaPlugin implements Listener
     @EventHandler
     private void playerSneak(PlayerSneakEvent event)
     {
-        final int x = event.getPlayer().getLocation().getBlockX();
-        final int y = event.getPlayer().getLocation().getBlockY();
-        final int z = event.getPlayer().getLocation().getBlockZ();
+        final Location from = event.getPlayer().getLocation().subtract(0, 1, 0);
+        final NamespacedKey key = this.elevatorKey(from);
 
-        final Location location = new Location(event.getPlayer().getWorld(), x, y - 1, z);
-
-        if (!this.elevators.contains(location.getBlock().getType()))
+        if (!from.getChunk().getPersistentDataContainer().has(key))
         {
             return;
         }
 
-        for (int i = y; i > event.getPlayer().getWorld().getMinHeight(); i--)
-        {
-            if (event.getPlayer().getWorld().getBlockAt(x, i, z).getLocation().equals(location))
-            {
-                continue;
-            }
+        from.getChunk().getPersistentDataContainer()
+                .getKeys()
+                .stream()
+                .filter(i -> i.getNamespace().equals(this.getName().toLowerCase(Locale.ROOT)))
+                .map(i -> from.getChunk().getPersistentDataContainer().get(i, PersistentDataType.STRING))
+                .map(i -> this.deserialize(i))
+                .filter(i -> from.getBlockX() == i.getBlockX() && from.getBlockZ() == i.getBlockZ())
+                .map(i -> i.getBlockY())
+                .filter(i -> i < from.getBlockY())
+                .max(Integer::compareTo)
+                .ifPresent(i -> {
+                    final Location location = from.clone();
 
-            if (!this.elevators.contains(event.getPlayer().getWorld().getBlockAt(x, i, z).getType()))
-            {
-                continue;
-            }
+                    location.setY(i);
+                    location.add(0, 1, 0);
 
-            if (this.config.get("elevators." + (x + i + z)) == null)
-            {
-                break;
-            }
-
-            event.getPlayer().playSound(this.sound);
-            event.getPlayer().teleport(event.getPlayer().getWorld().getBlockAt(x, i + 1, z).getLocation().toCenterLocation());
-            break;
-        }
+                    event.getPlayer().teleport(location);
+                    event.getPlayer().playSound(this.sound);
+                });
     }
 
     @EventHandler
     private void playerJump(PlayerJumpEvent event)
     {
-        final int x = event.getPlayer().getLocation().getBlockX();
-        final int y = event.getPlayer().getLocation().getBlockY();
-        final int z = event.getPlayer().getLocation().getBlockZ();
+        final NamespacedKey key = this.elevatorKey(event.getFrom().clone().subtract(0, 1, 0));
 
-        final Material material = new Location(event.getPlayer().getWorld(), x, y - 1, z).getBlock().getType();
-
-        if (!this.elevators.contains(material))
+        if (!event.getFrom().getChunk().getPersistentDataContainer().has(key))
         {
             return;
         }
 
-        if (this.config.get("elevators." + (x + (y - 1) + z)) == null)
-        {
-            return;
-        }
+        event.getFrom().getChunk().getPersistentDataContainer()
+                .getKeys()
+                .stream()
+                .filter(i -> i.getNamespace().equals(this.getName().toLowerCase(Locale.ROOT)))
+                .map(i -> event.getFrom().getChunk().getPersistentDataContainer().get(i, PersistentDataType.STRING))
+                .map(i -> this.deserialize(i))
+                .filter(i -> event.getFrom().getBlockX() == i.getBlockX() && event.getFrom().getBlockZ() == i.getBlockZ())
+                .map(i -> i.getBlockY())
+                .filter(i -> i > event.getFrom().getBlockY())
+                .min(Integer::compareTo)
+                .ifPresent(i -> {
+                    final Location location = event.getFrom().clone();
 
-        for (int i = y; i < event.getPlayer().getWorld().getMaxHeight(); i++)
-        {
-            if (!this.elevators.contains(event.getPlayer().getWorld().getBlockAt(x, i, z).getType()))
-            {
-                continue;
-            }
+                    location.setY(i);
+                    location.add(0, 1, 0);
 
-            if (this.config.get("elevators." + (x + i + z)) == null)
-            {
-                break;
-            }
-
-            event.getPlayer().playSound(this.sound);
-            event.getPlayer().teleport(event.getPlayer().getWorld().getBlockAt(x, i + 1, z).getLocation().toCenterLocation());
-            break;
-        }
+                    event.getPlayer().teleport(location);
+                    event.getPlayer().playSound(this.sound);
+                });
     }
 
     @EventHandler
@@ -167,7 +137,7 @@ public final class Elevators extends JavaPlugin implements Listener
             return;
         }
 
-        if (!event.getAction().equals(Action.RIGHT_CLICK_BLOCK))
+        if (!event.getAction().isRightClick())
         {
             return;
         }
@@ -186,66 +156,115 @@ public final class Elevators extends JavaPlugin implements Listener
         {
             return;
         }
-        
-        event.setCancelled(true);
 
-        final int x = event.getClickedBlock().getLocation().getBlockX();
-        final int y = event.getClickedBlock().getLocation().getBlockY();
-        final int z = event.getClickedBlock().getLocation().getBlockZ();
+        final NamespacedKey key = this.elevatorKey(event.getClickedBlock().getLocation());
 
-        if (this.config.get("elevators." + (x + y + z)) != null)
+        if (event.getClickedBlock().getLocation().getChunk().getPersistentDataContainer().has(key))
         {
-            event.getPlayer().sendMessage(this.deserializeMessage("elevator_exists"));
+            final String message = this.messages.get("messages.elevator_exists");
+
+            event.getPlayer().sendMessage(this.miniMessage.deserialize(message));
+
             return;
         }
 
-        this.config.set("elevators." + (x + y + z), 0);
+        event.setCancelled(true);
 
-        final int newamount = event.getItem().getAmount() - 1;
+        event.getClickedBlock().getLocation().getChunk().getPersistentDataContainer()
+                .set(key, PersistentDataType.STRING, this.serialize(event.getClickedBlock().getLocation()));
 
-        if (newamount == 0)
-        {
-            event.getPlayer().getInventory().remove(event.getItem());
-        }
-        else
-        {
-            event.getItem().setAmount(newamount);
-        }
+        event.getItem().subtract();
 
-        event.getPlayer().sendMessage(this.deserializeMessage("elevator_created"));
+        final String message = this.messages.get("messages.elevator_created");
+
+        event.getPlayer().sendMessage(this.miniMessage.deserialize(message));
     }
 
     @EventHandler
     private void blockBreak(BlockBreakEvent event)
     {
-        final int x = event.getBlock().getLocation().getBlockX();
-        final int y = event.getBlock().getLocation().getBlockY();
-        final int z = event.getBlock().getLocation().getBlockZ();
+        final NamespacedKey key = this.elevatorKey(event.getBlock().getLocation());
 
-        if (this.config.remove("elevators." + (x + y + z)) != null)
+        if (!event.getBlock().getChunk().getPersistentDataContainer().has(key))
         {
-            event.getBlock().getWorld().dropItem(event.getBlock().getLocation(), new ItemStack(Material.ENDER_PEARL));
-            event.getPlayer().sendMessage(this.deserializeMessage("elevator_destroyed"));
+            return;
         }
-    }
-    
-    private final FileConfig initConfig(String fileName)
-    {
-        this.saveResource(fileName, false);
 
-        final FileConfig config = FileConfig.builder(new File(this.getDataFolder(), fileName))
-                .autoreload()
-                .autosave()
-                .build();
+        event.getBlock().getChunk().getPersistentDataContainer().remove(key);
 
-        config.load();
-        
-        return config;
+        event.getPlayer().getWorld().dropItem(event.getPlayer().getLocation(), new ItemStack(Material.ENDER_PEARL));
+
+        final String message = this.messages.get("messages.elevator_destroyed");
+
+        event.getPlayer().sendMessage(this.miniMessage.deserialize(message));
     }
-    
-    private final Component deserializeMessage(String path)
+
+    @EventHandler
+    private void playerJoin(PlayerJoinEvent event)
     {
-        final String message = this.messages.get("messages." + path);
-        return this.miniMessage.deserialize(message);
+        ((CraftPlayer) event.getPlayer()).getHandle().networkManager.channel.pipeline()
+                .addBefore("packet_handler", event.getPlayer().getName(), new CustomHandler(event.getPlayer()));
+    }
+
+    private NamespacedKey elevatorKey(Location location)
+    {
+        return new NamespacedKey(this, this.serialize(location));
+    }
+
+    private String serialize(Location location)
+    {
+        final String worldname = location.getWorld().getName();
+        final int x = location.getBlockX();
+        final int y = location.getBlockY();
+        final int z = location.getBlockZ();
+
+        return worldname + "-" + x + "-" + y + "-" + z;
+    }
+
+    @Nullable
+    private Location deserialize(String location)
+    {
+        final String[] array = location.split("-");
+
+        final World world = this.getServer().getWorld(array[0]);
+
+        if (world == null)
+        {
+            return null;
+        }
+
+        final double x = Double.valueOf(array[1]);
+        final double y = Double.valueOf(array[2]);
+        final double z = Double.valueOf(array[3]);
+
+        return new Location(world, x, y, z);
+    }
+
+    class CustomHandler extends ChannelDuplexHandler
+    {
+        private final Player player;
+
+        public CustomHandler(Player player)
+        {
+            this.player = player;
+        }
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception
+        {
+            if (msg instanceof ServerboundPlayerCommandPacket)
+            {
+                final ServerboundPlayerCommandPacket packet = (ServerboundPlayerCommandPacket) msg;
+
+                if (packet.getAction().equals(ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY))
+                {
+                    getServer().getScheduler().runTask(instance, () -> {
+                        getServer().getPluginManager().callEvent(new PlayerSneakEvent(this.player));
+                    });
+                }
+            }
+
+            super.channelRead(ctx, msg);
+        }
     }
 }
