@@ -1,7 +1,0 @@
-{
-  "messages": {
-    "elevator_exists": "<red>This block is already an elevator",
-    "elevator_created": "Elevator created",
-    "elevator_destroyed": "Elevator destroyed"
-  }
-}

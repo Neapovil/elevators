@@ -1,57 +1,37 @@
 package com.github.neapovil.elevators;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.stream.Stream;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.World;
-import org.bukkit.craftbukkit.v1_18_R2.entity.CraftPlayer;
-import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.jetbrains.annotations.Nullable;
 
 import com.destroystokyo.paper.event.player.PlayerJumpEvent;
-import com.electronwill.nightconfig.core.file.FileConfig;
-import com.github.neapovil.elevators.event.PlayerSneakEvent;
+import com.github.neapovil.elevators.object.ChunkElevators;
+import com.github.neapovil.elevators.persistence.ChunkElevatorsDataType;
 
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandlerContext;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.sound.Sound;
-import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 
 public final class Elevators extends JavaPlugin implements Listener
 {
     private static Elevators instance;
     private final Sound sound = Sound.sound(Key.key("minecraft", "entity.enderman.teleport"), Sound.Source.PLAYER, 1, 1);
     private final List<Material> elevators = Stream.of(Material.values()).filter(i -> i.toString().toLowerCase().endsWith("wool")).toList();
-    private FileConfig messages;
-    private final MiniMessage miniMessage = MiniMessage.miniMessage();
+    private final NamespacedKey chunkElevatorsKey = new NamespacedKey(this, "chunk-elevators");
 
     @Override
     public void onEnable()
     {
         instance = this;
-
-        this.saveResource("messages.json", false);
-
-        this.messages = FileConfig.builder(this.getDataFolder().toPath().resolve("messages.json"))
-                .autoreload()
-                .autosave()
-                .build();
-
-        this.messages.load();
 
         this.getServer().getPluginManager().registerEvents(this, this);
     }
@@ -61,76 +41,82 @@ public final class Elevators extends JavaPlugin implements Listener
     {
     }
 
-    public static Elevators getInstance()
+    public static Elevators instance()
     {
         return instance;
     }
 
     @EventHandler
-    private void playerSneak(PlayerSneakEvent event)
+    private void playerSneak(PlayerToggleSneakEvent event)
     {
-        final Location from = event.getPlayer().getLocation().subtract(0, 1, 0);
-        final NamespacedKey key = this.elevatorKey(from);
-
-        if (!from.getChunk().getPersistentDataContainer().has(key))
+        if (!event.isSneaking())
         {
             return;
         }
 
-        from.getChunk().getPersistentDataContainer()
-                .getKeys()
-                .stream()
-                .filter(i -> i.getNamespace().equals(this.getName().toLowerCase(Locale.ROOT)))
-                .map(i -> from.getChunk().getPersistentDataContainer().get(i, PersistentDataType.STRING))
-                .map(i -> this.deserialize(i))
-                .filter(i -> from.getBlockX() == i.getBlockX() && from.getBlockZ() == i.getBlockZ())
-                .map(i -> i.getBlockY())
-                .filter(i -> i < from.getBlockY())
-                .max(Integer::compareTo)
-                .ifPresent(i -> {
-                    final Location location = from.clone();
+        final ChunkElevators elevators = event.getPlayer().getChunk().getPersistentDataContainer().get(this.chunkElevatorsKey, new ChunkElevatorsDataType());
 
-                    location.setY(i);
-                    location.add(0, 1, 0);
+        if (elevators == null)
+        {
+            return;
+        }
 
-                    event.getPlayer().teleport(location);
-                    event.getPlayer().playSound(this.sound);
-                });
+        final Location wool = event.getPlayer().getLocation().subtract(0, 1, 0);
+
+        if (elevators.has(wool))
+        {
+            elevators.elevators
+                    .stream()
+                    .filter(i -> wool.getBlockX() == i.getBlockX() && wool.getBlockZ() == i.getBlockZ())
+                    .map(i -> i.getBlockY())
+                    .filter(i -> i < wool.getBlockY())
+                    .max(Integer::compareTo)
+                    .ifPresent(i -> {
+                        final Location location = wool.clone();
+
+                        location.setY(i);
+                        location.add(0, 1, 0);
+
+                        event.getPlayer().teleport(location);
+                        event.getPlayer().playSound(this.sound);
+                    });
+        }
     }
 
     @EventHandler
     private void playerJump(PlayerJumpEvent event)
     {
-        final NamespacedKey key = this.elevatorKey(event.getFrom().clone().subtract(0, 1, 0));
+        final ChunkElevators elevators = event.getPlayer().getChunk().getPersistentDataContainer().get(this.chunkElevatorsKey, new ChunkElevatorsDataType());
 
-        if (!event.getFrom().getChunk().getPersistentDataContainer().has(key))
+        if (elevators == null)
         {
             return;
         }
 
-        event.getFrom().getChunk().getPersistentDataContainer()
-                .getKeys()
-                .stream()
-                .filter(i -> i.getNamespace().equals(this.getName().toLowerCase(Locale.ROOT)))
-                .map(i -> event.getFrom().getChunk().getPersistentDataContainer().get(i, PersistentDataType.STRING))
-                .map(i -> this.deserialize(i))
-                .filter(i -> event.getFrom().getBlockX() == i.getBlockX() && event.getFrom().getBlockZ() == i.getBlockZ())
-                .map(i -> i.getBlockY())
-                .filter(i -> i > event.getFrom().getBlockY())
-                .min(Integer::compareTo)
-                .ifPresent(i -> {
-                    final Location location = event.getFrom().clone();
+        final Location wool = event.getFrom().clone().subtract(0, 1, 0);
 
-                    location.setY(i);
-                    location.add(0, 1, 0);
+        if (elevators.has(wool))
+        {
+            elevators.elevators
+                    .stream()
+                    .filter(i -> event.getFrom().getBlockX() == i.getBlockX() && event.getFrom().getBlockZ() == i.getBlockZ())
+                    .map(i -> i.getBlockY())
+                    .filter(i -> i > event.getFrom().getBlockY())
+                    .min(Integer::compareTo)
+                    .ifPresent(i -> {
+                        final Location location = event.getFrom().clone();
 
-                    event.getPlayer().teleport(location);
-                    event.getPlayer().playSound(this.sound);
-                });
+                        location.setY(i);
+                        location.add(0, 1, 0);
+
+                        event.getPlayer().teleport(location);
+                        event.getPlayer().playSound(this.sound);
+                    });
+        }
     }
 
     @EventHandler
-    private void playerInteract(PlayerInteractEvent event)
+    private void createElevator(PlayerInteractEvent event)
     {
         if (event.getClickedBlock() == null)
         {
@@ -157,114 +143,44 @@ public final class Elevators extends JavaPlugin implements Listener
             return;
         }
 
-        final NamespacedKey key = this.elevatorKey(event.getClickedBlock().getLocation());
+        ChunkElevators elevators = event.getClickedBlock().getChunk().getPersistentDataContainer().get(this.chunkElevatorsKey, new ChunkElevatorsDataType());
 
-        if (event.getClickedBlock().getLocation().getChunk().getPersistentDataContainer().has(key))
+        if (elevators == null)
         {
-            final String message = this.messages.get("messages.elevator_exists");
-
-            event.getPlayer().sendMessage(this.miniMessage.deserialize(message));
-
-            return;
+            elevators = new ChunkElevators();
         }
 
-        event.setCancelled(true);
-
-        event.getClickedBlock().getLocation().getChunk().getPersistentDataContainer()
-                .set(key, PersistentDataType.STRING, this.serialize(event.getClickedBlock().getLocation()));
-
-        event.getItem().subtract();
-
-        final String message = this.messages.get("messages.elevator_created");
-
-        event.getPlayer().sendMessage(this.miniMessage.deserialize(message));
+        if (elevators.has(event.getClickedBlock().getLocation()))
+        {
+            event.getPlayer().sendRichMessage("<red>This block is already an elevator");
+        }
+        else
+        {
+            event.setCancelled(true);
+            elevators.elevators.add(event.getClickedBlock().getLocation());
+            event.getClickedBlock().getChunk().getPersistentDataContainer().set(this.chunkElevatorsKey, new ChunkElevatorsDataType(), elevators);
+            event.getItem().subtract();
+            event.getPlayer().sendMessage("Elevator created");
+        }
     }
 
     @EventHandler
-    private void blockBreak(BlockBreakEvent event)
+    private void destroyElevator(BlockBreakEvent event)
     {
-        final NamespacedKey key = this.elevatorKey(event.getBlock().getLocation());
+        final ChunkElevators elevators = event.getBlock().getChunk().getPersistentDataContainer().get(this.chunkElevatorsKey, new ChunkElevatorsDataType());
 
-        if (!event.getBlock().getChunk().getPersistentDataContainer().has(key))
+        if (elevators == null)
         {
             return;
         }
 
-        event.getBlock().getChunk().getPersistentDataContainer().remove(key);
+        final boolean removed = elevators.elevators.removeIf(i -> i.equals(event.getBlock().getLocation()));
 
-        event.getPlayer().getWorld().dropItem(event.getPlayer().getLocation(), new ItemStack(Material.ENDER_PEARL));
-
-        final String message = this.messages.get("messages.elevator_destroyed");
-
-        event.getPlayer().sendMessage(this.miniMessage.deserialize(message));
-    }
-
-    @EventHandler
-    private void playerJoin(PlayerJoinEvent event)
-    {
-        ((CraftPlayer) event.getPlayer()).getHandle().networkManager.channel.pipeline()
-                .addBefore("packet_handler", "elevators-plugin", new CustomHandler(event.getPlayer()));
-    }
-
-    private NamespacedKey elevatorKey(Location location)
-    {
-        return new NamespacedKey(this, this.serialize(location));
-    }
-
-    private String serialize(Location location)
-    {
-        final String worldname = location.getWorld().getName();
-        final int x = location.getBlockX();
-        final int y = location.getBlockY();
-        final int z = location.getBlockZ();
-
-        return worldname + "-" + x + "-" + y + "-" + z;
-    }
-
-    @Nullable
-    private Location deserialize(String location)
-    {
-        final String[] array = location.split("-");
-
-        final World world = this.getServer().getWorld(array[0]);
-
-        if (world == null)
+        if (removed)
         {
-            return null;
-        }
-
-        final double x = Double.valueOf(array[1]);
-        final double y = Double.valueOf(array[2]);
-        final double z = Double.valueOf(array[3]);
-
-        return new Location(world, x, y, z);
-    }
-
-    class CustomHandler extends ChannelDuplexHandler
-    {
-        private final Player player;
-
-        public CustomHandler(Player player)
-        {
-            this.player = player;
-        }
-
-        @Override
-        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception
-        {
-            if (msg instanceof ServerboundPlayerCommandPacket)
-            {
-                final ServerboundPlayerCommandPacket packet = (ServerboundPlayerCommandPacket) msg;
-
-                if (packet.getAction().equals(ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY))
-                {
-                    getServer().getScheduler().runTask(instance, () -> {
-                        getServer().getPluginManager().callEvent(new PlayerSneakEvent(this.player));
-                    });
-                }
-            }
-
-            super.channelRead(ctx, msg);
+            event.getBlock().getChunk().getPersistentDataContainer().set(this.chunkElevatorsKey, new ChunkElevatorsDataType(), elevators);
+            event.getPlayer().getWorld().dropItem(event.getPlayer().getLocation(), new ItemStack(Material.ENDER_PEARL));
+            event.getPlayer().sendMessage("Elevator destroyed");
         }
     }
 }

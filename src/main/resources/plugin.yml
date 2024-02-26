@@ -1,6 +1,6 @@
 name: Elevators
 main: com.github.neapovil.elevators.Elevators
 version: 1.0.0
-api-version: 1.13
+api-version: 1.19
 author: Neapovil
 website: https://github.com/Neapovil/elevators
